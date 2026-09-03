@@ -3,6 +3,12 @@
 A cut-down clipping marketplace: brands post paid campaigns, creators submit
 short-form clips, and creators earn per 1,000 views up to the campaign budget.
 
+**Live:** https://wavy-agency-takehome.vercel.app
+
+There is no login. Pick an identity from the user switcher in the header —
+`admin@wavy.test` for the admin side, `alice@creator.test` for the creator
+side. The live database is seeded; §9 covers the deployment.
+
 ## 1. Setup
 
 Needs Node 20+, pnpm, and Docker.
@@ -227,11 +233,44 @@ The pattern: it is fast and mostly right on shape, and unreliable on anything
 where the code reads correctly but the runtime behaviour differs — generated
 SQL, race conditions, rendered colour. Those are the places I checked by hand.
 
-## 8. Where things are
+## 8. Deployment
+
+Vercel (app) plus Neon (Postgres 16, `eu-central-1`). Only `DATABASE_URL` and
+`AUTH_SECRET` differ from local; there is no deployment-specific code path.
+
+Two things were worth getting right rather than accepting the default:
+
+- **Functions are pinned to `fra1`** (`vercel.json`). Vercel defaulted to
+  `iad1`, which put every query on a transatlantic round trip to a Frankfurt
+  database. That is bad for page loads and worse for correctness-adjacent
+  reasons: the approval path issues several queries *while holding the campaign
+  row lock*, so cross-region latency directly lengthens the window other
+  admins are blocked for. Same region takes the heaviest page from ~940 ms to
+  ~360 ms warm.
+- **Prepared statements are disabled when the URL points at a pooler**
+  (`src/server/db/index.ts`). Neon's `-pooler` host is PgBouncer in transaction
+  mode and cannot serve them. The check is on the URL, so local development
+  against plain Postgres keeps them. `postgres.js` is also capped at one
+  connection per function instance on Vercel. Verified through the pooled URL:
+  the locking transactions and the idempotent ingest both behave as they do
+  locally.
+
+The GitHub repo is connected, so pushes to `main` deploy automatically. The
+live database was migrated and seeded once (`pnpm db:migrate`, `pnpm db:seed`
+against the direct, non-pooled URL) and is not reseeded on deploy — `db:seed`
+truncates, so re-running it would wipe anything you create while clicking
+around.
+
+`pnpm ingest` is not scheduled. It was run once against the live database so
+the charts and earnings have data. Wiring it to a cron is a one-liner, but the
+brief asks for a script, not a scheduler.
+
+## 9. Where things are
 
 ```
 drizzle/                          committed migrations
 docker-compose.yml                Postgres 16 + the test database
+vercel.json                       pins functions to fra1, next to the database
 src/lib/payout.ts                 the payout rule, pure and integer-only
 src/lib/post-url.ts               per-platform URL shape + normalisation
 src/lib/validation/               Zod schemas shared by client and server

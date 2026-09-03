@@ -3,6 +3,8 @@
 Brands post paid clipping campaigns. Creators submit short-form clips and earn
 per 1,000 views, up to the campaign budget.
 
+**Live:** https://wavy-agency-takehome.vercel.app
+
 Take-home for a full-stack role. **See [NOTES.md](./NOTES.md)** for the setup
 steps, how concurrent approvals are handled, what was left out on purpose, and
 where AI tooling was used.
