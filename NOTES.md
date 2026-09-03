@@ -162,22 +162,54 @@ say what is missing. When remaining spend reaches zero the campaign is set to
 
 ## 5. First thing I would fix with another day
 
-**Replace the recomputed spend aggregate with a maintained
-`campaign.spent_cents`.** Every approval and every overview load runs a
-`DISTINCT ON` over the campaign's metric rows to find each submission's latest
-view count. It is correct and it is indexed, but it is O(metric rows per
-campaign) on a table that grows one row per approved submission per day — a
-campaign running for a year with a few hundred clips is already six figures of
-rows behind a query on the approval hot path. I would keep the value on the
-campaign row, update it in the same transaction as the approval and at the end
-of each ingest run, add a `CHECK (spent_cents <= total_budget)` so the
-invariant lives in the schema, and keep the aggregate as a reconciliation job
-that asserts the two agree.
+**The UI, by leaning on TanStack and shadcn properly instead of hand-rolling.**
+Not visual design — §7 of the brief says that earns nothing, and I agree. The
+problem is that the interface is assembled from primitives where composed
+building blocks already exist, and it shows in behaviour rather than looks:
 
-Close behind: the `submission_metric` rows are cumulative, which makes every
-"views in a window" question a window function. Storing the daily delta
-alongside the total would make the chart and any future reporting a plain
-`SUM`, at the cost of one derived column.
+- **The tables are hand-written markup.** `TableRow`/`TableCell` mapped over an
+  array, so there is no column sorting, no column visibility, no row selection,
+  and no shared empty/loading contract between the three of them. TanStack
+  Table under shadcn's data-table block gives all of that from one column
+  definition per table, and it is the thing that makes the review queue
+  genuinely usable: row selection plus a bulk action, so an admin working
+  through fifty pending clips is not clicking Approve fifty times.
+- **Pagination is a bare Previous/Next pair.** No page numbers, no page-size
+  control, no total-aware jump. The server already returns `page`, `pageCount`
+  and `total`, so the data is there — the control just was not built.
+- **The app shell is a flat header.** shadcn's sidebar block would separate
+  admin and creator navigation properly, and give the campaign detail page
+  somewhere to put per-campaign sub-navigation instead of stacking three cards
+  vertically.
+- **The filter bar is ad hoc.** Hand-wired `useSearchParams` plus a
+  `setTimeout` debounce. A faceted-filter component over the same URL state
+  would be less code and would handle multi-select status, which the current
+  single `Select` cannot express.
+- **Loading states are approximate.** One `Skeleton` in the review queue and
+  nothing on the server-rendered pages, so navigation between admin pages has
+  no feedback. Suspense boundaries per card with skeletons that match the real
+  layout, and `useQuery` placeholders on the client tables, would fix the
+  perceived speed without touching the queries.
+- **One chart, one shape.** Daily views is a bar chart because that is what
+  fits gaps honestly, but spend-against-budget over time is the number an admin
+  actually watches, and that wants a second series and a reference line for the
+  ceiling.
+
+None of this changes a query or a procedure — it is all presentation-layer
+reuse, which is exactly why it is the first thing I would do with another day
+rather than something I would do instead of the correctness work.
+
+**Close behind, on the server side:** replace the recomputed spend aggregate
+with a maintained `campaign.spent_cents`. Every approval and every overview
+load runs a `DISTINCT ON` over the campaign's metric rows to find each
+submission's latest view count. It is correct and indexed, but it is
+O(metric rows per campaign) on a table that grows one row per approved
+submission per day — a campaign running a year with a few hundred clips is
+already six figures of rows behind a query on the approval hot path. I would
+keep the value on the campaign row, update it in the same transaction as the
+approval and at the end of each ingest run, add a
+`CHECK (spent_cents <= total_budget)` so the invariant lives in the schema, and
+keep the aggregate as a reconciliation job asserting the two agree.
 
 ## 6. Tests, and why these
 
