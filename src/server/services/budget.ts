@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { DbOrTx } from "@/server/db";
 import { campaigns, submissionMetrics, submissions } from "@/server/db/schema";
-import { budgetLeft, earningsForViews } from "@/lib/payout";
+import { budgetLeft } from "@/lib/payout";
 
 /** Statuses that consume budget. */
 export const PAYABLE_STATUSES = ["approved", "paid"] as const;
@@ -17,10 +17,7 @@ export const PAYABLE_STATUSES = ["approved", "paid"] as const;
 export async function payableViewThousands(
   tx: DbOrTx,
   campaignId: string,
-  options: { excludeSubmissionId?: string } = {},
 ): Promise<number> {
-  const excluded = options.excludeSubmissionId ?? null;
-
   const rows = await tx.execute<{ view_thousands: string }>(sql`
     SELECT COALESCE(SUM(FLOOR(latest.views / 1000)), 0)::bigint AS view_thousands
     FROM (
@@ -29,7 +26,6 @@ export async function payableViewThousands(
       JOIN ${submissions} s ON s.id = m.submission_id
       WHERE s.campaign_id = ${campaignId}
         AND s.status IN ('approved', 'paid')
-        AND (${excluded}::uuid IS NULL OR s.id <> ${excluded}::uuid)
       ORDER BY m.submission_id, m.captured_at DESC
     ) AS latest
   `);
@@ -113,5 +109,3 @@ export async function completeCampaignIfExhausted(
 
   return true;
 }
-
-export { earningsForViews };
