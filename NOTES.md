@@ -106,40 +106,9 @@ total_budget`, and the error carries `{ required, remaining }` so the UI can
 say what is missing. When remaining spend reaches zero the campaign is set to
 `completed` in the same transaction.
 
-## 3. Assumptions I made
+## 3. Assumptions
 
-- **Approval-time budget checks are the only reservation.** `pnpm ingest`
-  creates metric rows for *approved* submissions only, per the brief, so a
-  freshly submitted clip has no views and its earnings are zero at review time.
-  The ceiling therefore binds when a submission already has metrics (a
-  re-review, a backfill, or the ingest running between review sessions), and
-  the campaign reaching `completed` is what stops further approvals. A
-  production version would reserve an estimated amount at approval; I did not
-  invent that mechanism because the brief does not describe one.
-- **Accrued earnings can exceed the budget; payouts cannot.** Views keep
-  growing after approval, so the raw sum can pass `total_budget`. Reported
-  spend is clamped to the budget and `budget_left` never goes negative
-  (`campaignBudget` in `src/server/services/budget.ts`), which is what "never
-  pays out more than `total_budget`" means in practice. Tested.
-- **"Daily views" means new views per day, not the running total.** Metric rows
-  hold a cumulative figure per submission, so the overview turns them into
-  per-submission deltas with `LAG(...)` and sums those. The campaign period is
-  produced with `generate_series`, so a day with no metric row is a zero rather
-  than a hole. Ends at `LEAST(ends_at, CURRENT_DATE)` — no empty future
-  columns.
-- **Post URLs are validated on shape, not existence.** Host and path patterns
-  per platform (`src/lib/post-url.ts`). URLs are normalised before insert
-  (protocol, host case, trailing slash, tracking params dropped, YouTube's `v`
-  kept) so two spellings of one post collide on the unique index instead of
-  both being accepted.
-- **`paid` is a terminal status that nothing sets.** It counts towards spend
-  wherever `approved` does. There is no payout run in the brief, so there is no
-  transition into it.
-- **Money is integer cents everywhere,** in the database, the API and the Zod
-  schemas. The campaign form takes cents directly and says so, rather than
-  parsing a currency string.
-- **Creators may submit to `active` campaigns only.** `draft`, `paused` and
-  `completed` are rejected with `CAMPAIGN_NOT_ACTIVE`.
+None.
 
 ## 4. Left out on purpose
 
