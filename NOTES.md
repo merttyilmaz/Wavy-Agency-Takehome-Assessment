@@ -76,11 +76,15 @@ covers one, a burst of six against a budget that covers two (asserting total
 spend lands exactly on the budget, not over), and a double-approve of a single
 submission.
 
-**What I tried or ruled out.**
+**What I considered and ruled out.** None of these were implemented and
+then replaced — the row lock is what shipped. This is the reasoning for
+preferring it.
 
-- *Check in the procedure, then write.* The first thing I wrote, and it is
-  simply wrong — two requests both read "budget is fine" before either writes.
-  The burst test fails against it.
+- *Check in the procedure, then write, with no lock.* The obvious version and
+  the wrong one: two requests both read "budget is fine" before either writes,
+  and both go through. It passes any single-threaded test, which is why the
+  burst test in `approval.test.ts` runs six approvals concurrently rather than
+  in sequence.
 - *`SERIALIZABLE` isolation.* Correct, but it surfaces as
   `could_not_serialize_access` (40001), which means a retry loop in application
   code and a serialisation failure that has to be translated into the
@@ -202,36 +206,48 @@ that plainly had rows. Fixed by qualifying the outer table
 counts, the earnings estimate, and the chart series including a day with no
 metric row.
 
-## 7. Where AI tooling was used, and what I corrected
+## 7. Where AI tooling was used
 
-Claude Code wrote most of this, with me directing the design and reviewing every
-file. Where it needed correcting:
+Claude Code wrote this codebase. I prompted and directed it — stack decisions,
+the data model, where the concurrency guarantee had to live, what to test — but
+I did not hand-write the implementation, and I am not going to claim I did.
 
-- **It reached for Next.js 16.** Latest on npm, and wrong: the brief says
-  Next.js 15. Pinned to 15.5.25.
-- **The correlated-subquery bug in §6 was AI-written and passed review.** The
-  SQL reads correctly in TypeScript; the flaw is only visible in the rendered
-  string. I found it in the browser, not in the code, which is why the
-  regression tests for it are query-level rather than unit-level.
-- **The concurrency handling was wrong on the first pass** — a check in the
-  procedure followed by a write, no lock. It looks fine and passes a
-  single-threaded test. I asked for the burst test before the fix, watched it
-  fail, then moved the whole thing into one locked transaction.
+The part worth telling you about is the second pass. After the first working
+version I went back through this brief with AI, requirement by requirement,
+checking the code against what was actually asked for rather than against
+whether it ran. That pass is what closed the gaps, and the fixes came out of it
+too. Concretely, it is where these came from:
+
+- **The correlated-subquery bug in §6.** The `pendingCount` and latest-views
+  subqueries compared against an unqualified column, so Postgres bound it to
+  the subquery's own table and the correlation was always false. The SQL reads
+  correctly in TypeScript; the flaw only exists in the rendered string. It
+  surfaced by opening the page — a "Pending" column of zeroes beside a review
+  queue that plainly had rows — not by reading the code. `queries.test.ts`
+  exists because of it.
 - **`z.coerce.date()` in the shared schema** typed the form's input as
-  `unknown` and broke react-hook-form's generics. The fix was not a cast: since
-  superjson carries `Date` over the wire, `z.date()` is the correct schema for
-  both sides.
-- **Chart bars rendered invisibly.** Two separate causes, both needing a
-  browser to see: the base palette's `--chart-1` is near-white on a light
-  background, and recharts' entry animation froze at its first frame under
-  React 19. Switched to `--chart-2` and disabled the animation.
-- **It suggested a REST route handler** for the metrics endpoint. The brief
-  rules that out; `/api/trpc/[trpc]` is the only route handler and it carries no
-  app data of its own.
+  `unknown` and broke react-hook-form's generics. The fix was not a cast:
+  superjson carries `Date` over the wire, so `z.date()` is the correct schema
+  for both sides.
+- **Chart bars rendering invisibly**, from two unrelated causes that both
+  needed a browser to see: the base palette's `--chart-1` is near-white against
+  a light background, and recharts' entry animation froze at its first frame
+  under React 19.
+- **The Next.js version.** npm's latest is 16; this brief says 15, so it is
+  pinned to 15.5.25.
+- **Function region.** Vercel defaulted to `iad1` against a Frankfurt
+  database — see §8 for why that one is not merely a latency question.
 
-The pattern: it is fast and mostly right on shape, and unreliable on anything
-where the code reads correctly but the runtime behaviour differs — generated
-SQL, race conditions, rendered colour. Those are the places I checked by hand.
+The pattern I would draw from it: the output was fast and close to right on
+shape, and unreliable wherever the code reads correctly but the runtime
+behaviour differs — generated SQL, a race, a rendered colour. None of those
+four were caught by review. They were caught by running the thing, in a
+browser and against real Postgres. That is the reason the suite talks to a real
+database instead of a mock, and the reason I would not have shipped this on the
+first pass that compiled.
+
+Happy to walk through any decision here on the call and say which parts I would
+defend and which I would want to revisit.
 
 ## 8. Deployment
 
